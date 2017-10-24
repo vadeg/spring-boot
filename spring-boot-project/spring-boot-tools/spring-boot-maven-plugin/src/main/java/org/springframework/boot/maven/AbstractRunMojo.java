@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.model.Resource;
@@ -101,8 +102,11 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	 * NOTE: the use of JVM arguments means that processes will be started by forking a
 	 * new JVM.
 	 * @since 1.1
+	 * @deprecated use {@link AbstractRunMojo#jvmOptions} for JVM options
+	 * and {@link AbstractRunMojo#systemProperties} for system properties.
 	 */
 	@Parameter(property = "spring-boot.run.jvmArguments")
+	@Deprecated
 	private String jvmArguments;
 
 	/**
@@ -169,6 +173,22 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	@Parameter(property = "spring-boot.run.skip", defaultValue = "false")
 	private boolean skip;
 
+	/**
+	 * List of JVM options.
+	 * @since 2.0
+	 */
+	@Parameter(property = "spring-boot.run.jvmOptions")
+	private List<String> jvmOptions;
+
+	/**
+	 * List of JVM system properties. System property consists of key and value
+	 * and it will be transformed to <code>-Dkey=value</code> format.
+	 * In case if value is not specified or empty only key will be provided.
+	 * @since 2.0
+	 */
+	@Parameter(property = "spring-boot.run.systemProperties")
+	private List<SystemProperty> systemProperties;
+
 	@Override
 	public void execute() throws MojoExecutionException, MojoFailureException {
 		if (this.skip) {
@@ -201,7 +221,9 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	}
 
 	private boolean hasJvmArgs() {
-		return (this.jvmArguments != null && !this.jvmArguments.isEmpty());
+		return (this.jvmArguments != null && !this.jvmArguments.isEmpty()) ||
+				(this.jvmOptions != null && !this.jvmOptions.isEmpty()) ||
+				(this.systemProperties != null && !this.systemProperties.isEmpty());
 	}
 
 	private boolean hasWorkingDirectorySet() {
@@ -232,8 +254,25 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 			getLog().warn("Fork mode disabled, ignoring agent");
 		}
 		if (hasJvmArgs()) {
-			getLog().warn("Fork mode disabled, ignoring JVM argument(s) ["
-					+ this.jvmArguments + "]");
+			String messageTemplate = "Fork mode disabled, ignoring JVM argument(s) [%s]";
+			String sysPropsStr = null;
+			if (this.systemProperties != null && !this.systemProperties.isEmpty()) {
+				sysPropsStr = this.systemProperties
+						.stream()
+						.map(SystemProperty::asString)
+						.collect(Collectors.joining(" "));
+			}
+			String message = String.format(
+					messageTemplate,
+					String.join(
+							", ",
+							this.jvmArguments,
+							String.join(" ", this.jvmOptions),
+							sysPropsStr
+					)
+			);
+
+			getLog().warn(message);
 		}
 		if (hasWorkingDirectorySet()) {
 			getLog().warn("Fork mode disabled, ignoring working directory configuration");
@@ -292,7 +331,23 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	 * @return a {@link RunArguments} defining the JVM arguments
 	 */
 	protected RunArguments resolveJvmArguments() {
-		return new RunArguments(this.jvmArguments);
+		final StringBuilder stringBuilder = new StringBuilder(this.jvmArguments);
+		if (this.jvmOptions != null) {
+			stringBuilder
+					.append(" ")
+					.append(String.join(" ", this.jvmOptions));
+		}
+		if (this.systemProperties != null) {
+			String result = this.systemProperties
+					.stream()
+					.map(SystemProperty::asString)
+					.collect(Collectors.joining(" "));
+			stringBuilder
+					.append(" ")
+					.append(result);
+
+		}
+		return new RunArguments(stringBuilder.toString());
 	}
 
 	private void addJvmArgs(List<String> args) {
